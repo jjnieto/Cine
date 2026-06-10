@@ -18,6 +18,9 @@ npm-debug.log*
 chaincodes/**/*.test
 chaincodes/**/coverage.out
 chaincodes/**/vendor/
+chaincodes/governance/governance
+chaincodes/bond-issuance/bond-issuance
+chaincodes/bond-lifecycle/bond-lifecycle
 
 # Fabric binaries & generated material
 network/bin/
