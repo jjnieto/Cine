@@ -121,8 +121,11 @@ cmd_deploy_cc() {
   local version="${3:-1.0}"
   local seq="${4:-1}"
 
+  # Normalizar src a absoluto (resuelve si lo pasaron relativo al CWD del invocador).
+  src="$(cd "$src" && pwd)"
+
   local pkg="$NETWORK_DIR/channel-artifacts/${name}.tar.gz"
-  peer lifecycle chaincode package "$pkg" --path "$src" --lang golang --label "${name}_${version}"
+  FABRIC_CFG_PATH="$CFG_PEER" peer lifecycle chaincode package "$pkg" --path "$src" --lang golang --label "${name}_${version}"
 
   local pkg_id=""
   for org in asociacion productora1 productora2 productora3; do
