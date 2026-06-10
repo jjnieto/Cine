@@ -129,6 +129,9 @@ Los errores del chaincode aparecen en la respuesta del backend con el mensaje re
 
 ### 7. La UI
 
+Para una **guía paso a paso por las tres vistas** con qué clicar, qué esperar y los equivalentes por API, ver **[WALKTHROUGH.md](./WALKTHROUGH.md)**.
+
+
 ```bash
 cd frontend && npm install && npm run dev  # http://localhost:5173
 ```
