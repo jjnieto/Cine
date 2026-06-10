@@ -1,4 +1,3 @@
-import { Contract } from '@hyperledger/fabric-gateway';
 import { getContract } from './gateway.js';
 
 const decoder = new TextDecoder();
@@ -86,4 +85,3 @@ export const Lifecycle = {
   },
 };
 
-export { Contract };

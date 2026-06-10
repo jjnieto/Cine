@@ -1,4 +1,5 @@
-import { connect, signers, Contract, Gateway } from '@hyperledger/fabric-gateway';
+import { connect, signers } from '@hyperledger/fabric-gateway';
+import type { Contract, Gateway } from '@hyperledger/fabric-gateway';
 import * as grpc from '@grpc/grpc-js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';

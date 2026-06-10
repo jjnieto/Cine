@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import express from 'express';
+import express, { type NextFunction, type Request, type Response } from 'express';
 import { proposalsRouter } from './routes/proposals.js';
 import { bondsRouter } from './routes/bonds.js';
 import { investorsRouter } from './routes/investors.js';
@@ -13,6 +13,17 @@ app.use('/proposals', proposalsRouter);
 app.use('/bonds', bondsRouter);
 app.use('/investors', investorsRouter);
 app.use('/payments', paymentsRouter);
+
+// Error handler: extrae el mensaje del chaincode cuando viene en details[].message
+// (formato de @hyperledger/fabric-gateway). Si no, devuelve el mensaje plano.
+app.use((err: unknown, _req: Request, res: Response, _next: NextFunction) => {
+  const e = err as { message?: string; details?: Array<{ message?: string }>; cause?: unknown };
+  const ccMessages = (e.details ?? []).map((d) => d?.message).filter(Boolean);
+  res.status(500).json({
+    error: e.message ?? String(err),
+    chaincode: ccMessages.length ? ccMessages : undefined,
+  });
+});
 
 const port = Number(process.env.PORT ?? 3000);
 app.listen(port, () => console.log(`backend listening on :${port}`));
