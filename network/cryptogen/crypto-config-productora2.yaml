@@ -1,0 +1,10 @@
+PeerOrgs:
+  - Name: Productora2
+    Domain: productora2.productoras.local
+    EnableNodeOUs: true
+    Template:
+      Count: 1
+      SANS:
+        - localhost
+    Users:
+      Count: 1

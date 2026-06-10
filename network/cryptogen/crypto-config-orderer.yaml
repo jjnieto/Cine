@@ -1,0 +1,8 @@
+OrdererOrgs:
+  - Name: Orderer
+    Domain: productoras.local
+    EnableNodeOUs: true
+    Specs:
+      - Hostname: orderer
+        SANS:
+          - localhost

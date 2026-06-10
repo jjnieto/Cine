@@ -1,0 +1,196 @@
+# configtx.yaml — define orgs, política de canal y perfiles.
+# Asociacion + Productora1/2/3 son orgs peer. Orderer es un Raft de un solo nodo (dev).
+
+Organizations:
+  - &OrdererOrg
+    Name: OrdererOrg
+    ID: OrdererMSP
+    MSPDir: ../organizations/ordererOrganizations/productoras.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Writers:
+        Type: Signature
+        Rule: "OR('OrdererMSP.member')"
+      Admins:
+        Type: Signature
+        Rule: "OR('OrdererMSP.admin')"
+    OrdererEndpoints:
+      - orderer.productoras.local:7050
+
+  - &Asociacion
+    Name: AsociacionMSP
+    ID: AsociacionMSP
+    MSPDir: ../organizations/peerOrganizations/asociacion.productoras.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('AsociacionMSP.admin', 'AsociacionMSP.peer', 'AsociacionMSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('AsociacionMSP.admin', 'AsociacionMSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('AsociacionMSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('AsociacionMSP.peer')"
+    AnchorPeers:
+      - Host: peer0.asociacion.productoras.local
+        Port: 7051
+
+  - &Productora1
+    Name: Productora1MSP
+    ID: Productora1MSP
+    MSPDir: ../organizations/peerOrganizations/productora1.productoras.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Productora1MSP.admin', 'Productora1MSP.peer', 'Productora1MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Productora1MSP.admin', 'Productora1MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Productora1MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Productora1MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.productora1.productoras.local
+        Port: 8051
+
+  - &Productora2
+    Name: Productora2MSP
+    ID: Productora2MSP
+    MSPDir: ../organizations/peerOrganizations/productora2.productoras.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Productora2MSP.admin', 'Productora2MSP.peer', 'Productora2MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Productora2MSP.admin', 'Productora2MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Productora2MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Productora2MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.productora2.productoras.local
+        Port: 9051
+
+  - &Productora3
+    Name: Productora3MSP
+    ID: Productora3MSP
+    MSPDir: ../organizations/peerOrganizations/productora3.productoras.local/msp
+    Policies:
+      Readers:
+        Type: Signature
+        Rule: "OR('Productora3MSP.admin', 'Productora3MSP.peer', 'Productora3MSP.client')"
+      Writers:
+        Type: Signature
+        Rule: "OR('Productora3MSP.admin', 'Productora3MSP.client')"
+      Admins:
+        Type: Signature
+        Rule: "OR('Productora3MSP.admin')"
+      Endorsement:
+        Type: Signature
+        Rule: "OR('Productora3MSP.peer')"
+    AnchorPeers:
+      - Host: peer0.productora3.productoras.local
+        Port: 10051
+
+Capabilities:
+  Channel: &ChannelCapabilities
+    V2_0: true
+  Orderer: &OrdererCapabilities
+    V2_0: true
+  Application: &ApplicationCapabilities
+    V2_5: true
+
+Application: &ApplicationDefaults
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    LifecycleEndorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+    Endorsement:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Endorsement"
+  Capabilities:
+    <<: *ApplicationCapabilities
+
+Orderer: &OrdererDefaults
+  OrdererType: etcdraft
+  Addresses:
+    - orderer.productoras.local:7050
+  EtcdRaft:
+    Consenters:
+      - Host: orderer.productoras.local
+        Port: 7050
+        ClientTLSCert: ../organizations/ordererOrganizations/productoras.local/orderers/orderer.productoras.local/tls/server.crt
+        ServerTLSCert: ../organizations/ordererOrganizations/productoras.local/orderers/orderer.productoras.local/tls/server.crt
+  BatchTimeout: 2s
+  BatchSize:
+    MaxMessageCount: 10
+    AbsoluteMaxBytes: 99 MB
+    PreferredMaxBytes: 512 KB
+  Organizations:
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+    BlockValidation:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+
+Channel: &ChannelDefaults
+  Policies:
+    Readers:
+      Type: ImplicitMeta
+      Rule: "ANY Readers"
+    Writers:
+      Type: ImplicitMeta
+      Rule: "ANY Writers"
+    Admins:
+      Type: ImplicitMeta
+      Rule: "MAJORITY Admins"
+  Capabilities:
+    <<: *ChannelCapabilities
+
+Profiles:
+  # Bloque génesis para el canal de aplicación (Fabric 2.5+: no system channel).
+  ProductorasChannel:
+    <<: *ChannelDefaults
+    Orderer:
+      <<: *OrdererDefaults
+      Organizations:
+        - *OrdererOrg
+      Capabilities:
+        <<: *OrdererCapabilities
+    Application:
+      <<: *ApplicationDefaults
+      Organizations:
+        - *Asociacion
+        - *Productora1
+        - *Productora2
+        - *Productora3
+    Consortium: ProductorasConsortium

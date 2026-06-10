@@ -1,0 +1,46 @@
+# Node
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+.npm
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# TypeScript
+*.tsbuildinfo
+
+# Go
+chaincodes/**/*.test
+chaincodes/**/coverage.out
+chaincodes/**/vendor/
+
+# Fabric binaries & generated material
+network/bin/
+network/builders/
+network/config/
+network/organizations/peerOrganizations/
+network/organizations/ordererOrganizations/
+network/organizations/fabric-ca/*/msp/
+network/organizations/fabric-ca/*/tls-cert.pem
+network/organizations/fabric-ca/*/ca-cert.pem
+network/organizations/fabric-ca/*/IssuerPublicKey
+network/organizations/fabric-ca/*/IssuerRevocationPublicKey
+network/organizations/fabric-ca/*/fabric-ca-server.db
+network/system-genesis-block/
+network/channel-artifacts/
+network/wallet/
+network/*.tar.gz
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Frontend build
+frontend/dist/
