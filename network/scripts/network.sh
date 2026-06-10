@@ -9,12 +9,19 @@ set -euo pipefail
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 NETWORK_DIR="$( cd "$SCRIPT_DIR/.." && pwd )"
 export PATH="$NETWORK_DIR/bin:$PATH"
-export FABRIC_CFG_PATH="$NETWORK_DIR/configtx"
+
+# FABRIC_CFG_PATH cambia según la herramienta:
+#  - configtxgen / configtxlator → configtx/ (donde está configtx.yaml)
+#  - peer                        → config/   (donde install-fabric.sh deja core.yaml)
+#  - osnadmin                    → no la necesita
+CFG_CONFIGTX="$NETWORK_DIR/configtx"
+CFG_PEER="$NETWORK_DIR/config"
 
 CHANNEL_NAME="productoras"
 
 org_env() {
   local org="$1"
+  export FABRIC_CFG_PATH="$CFG_PEER"
   case "$org" in
     asociacion)
       export CORE_PEER_LOCALMSPID="AsociacionMSP"
@@ -55,7 +62,7 @@ cmd_crypto() {
 
 cmd_genesis() {
   mkdir -p "$NETWORK_DIR/channel-artifacts"
-  configtxgen \
+  FABRIC_CFG_PATH="$CFG_CONFIGTX" configtxgen \
     -profile ProductorasChannel \
     -outputBlock "$NETWORK_DIR/channel-artifacts/${CHANNEL_NAME}.block" \
     -channelID "$CHANNEL_NAME"
@@ -79,18 +86,30 @@ cmd_reset() {
 }
 
 cmd_create_channel() {
-  org_env asociacion
-  osnadmin channel join \
-    --channelID "$CHANNEL_NAME" \
-    --config-block "$NETWORK_DIR/channel-artifacts/${CHANNEL_NAME}.block" \
-    -o localhost:7053 \
-    --ca-file "$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/orderers/orderer.productoras.local/tls/server.crt" \
-    --client-cert "$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/users/Admin@productoras.local/tls/client.crt" \
-    --client-key "$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/users/Admin@productoras.local/tls/client.key"
+  local osn_ca="$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/orderers/orderer.productoras.local/tls/server.crt"
+  local osn_cert="$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/users/Admin@productoras.local/tls/client.crt"
+  local osn_key="$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/users/Admin@productoras.local/tls/client.key"
 
+  # Orderer join — idempotente: si el canal ya existe, seguimos.
+  if osnadmin channel list -o localhost:7053 --ca-file "$osn_ca" --client-cert "$osn_cert" --client-key "$osn_key" \
+       | grep -q "\"name\": \"$CHANNEL_NAME\""; then
+    echo "orderer ya unido al canal $CHANNEL_NAME, saltamos osnadmin channel join"
+  else
+    osnadmin channel join \
+      --channelID "$CHANNEL_NAME" \
+      --config-block "$NETWORK_DIR/channel-artifacts/${CHANNEL_NAME}.block" \
+      -o localhost:7053 \
+      --ca-file "$osn_ca" --client-cert "$osn_cert" --client-key "$osn_key"
+  fi
+
+  # Peer join por org — también idempotente.
   for org in asociacion productora1 productora2 productora3; do
     org_env "$org"
-    peer channel join -b "$NETWORK_DIR/channel-artifacts/${CHANNEL_NAME}.block"
+    if peer channel list 2>/dev/null | grep -q "^${CHANNEL_NAME}$"; then
+      echo "$org ya unido al canal, saltamos peer channel join"
+    else
+      peer channel join -b "$NETWORK_DIR/channel-artifacts/${CHANNEL_NAME}.block"
+    fi
   done
 }
 
