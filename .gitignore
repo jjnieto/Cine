@@ -11,6 +11,9 @@ npm-debug.log*
 .env.local
 .env.*.local
 
+# Data persistido por el backend (inversores y órdenes de demo)
+backend/.data/
+
 # TypeScript
 *.tsbuildinfo
 

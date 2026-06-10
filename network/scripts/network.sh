@@ -127,13 +127,17 @@ cmd_deploy_cc() {
   local pkg="$NETWORK_DIR/channel-artifacts/${name}.tar.gz"
   FABRIC_CFG_PATH="$CFG_PEER" peer lifecycle chaincode package "$pkg" --path "$src" --lang golang --label "${name}_${version}"
 
-  local pkg_id=""
+  # El package_id se calcula del propio paquete (hash). Mejor extraerlo de
+  # `calculatepackageid` antes de instalar, así no dependemos del orden del
+  # output de queryinstalled (que puede tener múltiples versiones de un mismo
+  # label si hubo re-deploys, y jq devolvería más de una).
+  local pkg_id
+  pkg_id="$(FABRIC_CFG_PATH="$CFG_PEER" peer lifecycle chaincode calculatepackageid "$pkg")"
+
   for org in asociacion productora1 productora2 productora3; do
     org_env "$org"
-    peer lifecycle chaincode install "$pkg"
-    if [ -z "$pkg_id" ]; then
-      pkg_id=$(peer lifecycle chaincode queryinstalled --output json | jq -r ".installed_chaincodes[] | select(.label==\"${name}_${version}\") | .package_id")
-    fi
+    # install es idempotente: si ya está, no rompe el flujo.
+    peer lifecycle chaincode install "$pkg" 2>&1 | grep -v "chaincode already successfully installed" || true
     peer lifecycle chaincode approveformyorg \
       -o localhost:7050 --ordererTLSHostnameOverride orderer.productoras.local \
       --tls --cafile "$NETWORK_DIR/organizations/ordererOrganizations/productoras.local/orderers/orderer.productoras.local/tls/server.crt" \

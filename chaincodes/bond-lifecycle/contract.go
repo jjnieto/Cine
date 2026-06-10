@@ -75,7 +75,7 @@ func (c *LifecycleContract) ConfirmPayment(
 	investorID string,
 	sepaRefHash string,
 ) error {
-	if err := requireRole(ctx, "payments.oracle"); err != nil {
+	if err := requireAsociacionOrRole(ctx, "payments.oracle"); err != nil {
 		return err
 	}
 	key, _ := ctx.GetStub().CreateCompositeKey(prefixPayment, []string{bondID, fmt.Sprintf("%010d", periodIndex), investorID})
@@ -116,7 +116,7 @@ func (c *LifecycleContract) MarkDefault(
 	periodIndex int32,
 	investorID string,
 ) error {
-	if err := requireRole(ctx, "payments.oracle"); err != nil {
+	if err := requireAsociacionOrRole(ctx, "payments.oracle"); err != nil {
 		return err
 	}
 	key, _ := ctx.GetStub().CreateCompositeKey(prefixPayment, []string{bondID, fmt.Sprintf("%010d", periodIndex), investorID})
@@ -175,13 +175,20 @@ func requireMSP(ctx contractapi.TransactionContextInterface, mspId string) error
 	return nil
 }
 
-func requireRole(ctx contractapi.TransactionContextInterface, role string) error {
+func requireAsociacionOrRole(ctx contractapi.TransactionContextInterface, role string) error {
+	msp, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return err
+	}
+	if msp == "AsociacionMSP" {
+		return nil
+	}
 	v, ok, err := ctx.GetClientIdentity().GetAttributeValue("role")
 	if err != nil {
 		return err
 	}
 	if !ok || v != role {
-		return fmt.Errorf("requires role %s", role)
+		return fmt.Errorf("requires AsociacionMSP or role=%s", role)
 	}
 	return nil
 }

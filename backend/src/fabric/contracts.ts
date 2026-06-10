@@ -1,4 +1,4 @@
-import { getContract } from './gateway.js';
+import { getContractAs, type ActorKey } from './gateway.js';
 
 const decoder = new TextDecoder();
 
@@ -7,35 +7,55 @@ function parseResult<T>(bytes: Uint8Array): T {
   return text ? (JSON.parse(text) as T) : (undefined as unknown as T);
 }
 
-// Wrappers tipados. Cada chaincode expone su superficie aquí.
+// Helpers tipados por chaincode. Las operaciones que requieren identidad
+// específica de una productora aceptan `actor`; las admin van siempre como
+// asociación.
 
 export const Governance = {
-  async createProposal(args: {
+  // --- admin (Asociacion) ---
+  async addProductora(mspId: string) {
+    await getContractAs('asociacion', 'governance').submitTransaction('AddProductora', mspId);
+  },
+  async removeProductora(mspId: string) {
+    await getContractAs('asociacion', 'governance').submitTransaction('RemoveProductora', mspId);
+  },
+  async init() {
+    await getContractAs('asociacion', 'governance').submitTransaction('Init');
+  },
+  async setParams(quorumBps: number, votingDurationS: number) {
+    await getContractAs('asociacion', 'governance').submitTransaction('SetParams', String(quorumBps), String(votingDurationS));
+  },
+  async getParams<T = unknown>(): Promise<T> {
+    return parseResult<T>(await getContractAs('asociacion', 'governance').evaluateTransaction('GetParams'));
+  },
+
+  // --- productora (acting as) ---
+  async createProposal(actor: ActorKey, args: {
     id: string; filmTitle: string; principalCents: string; couponBps: number;
-    termMonths: number; numParticipations: string; whitepaperHash: string; whitepaperURL: string;
+    termMonths: number; numParticipations: string; whitepaperHash: string; whitepaperUrl: string;
   }) {
-    const c = await getContract('governance');
-    await c.submitTransaction(
+    await getContractAs(actor, 'governance').submitTransaction(
       'CreateProposal',
       args.id, args.filmTitle, args.principalCents, String(args.couponBps),
-      String(args.termMonths), args.numParticipations, args.whitepaperHash, args.whitepaperURL,
+      String(args.termMonths), args.numParticipations, args.whitepaperHash, args.whitepaperUrl,
     );
   },
-  async castVote(proposalId: string, choice: boolean) {
-    const c = await getContract('governance');
-    await c.submitTransaction('CastVote', proposalId, String(choice));
+  async castVote(actor: ActorKey, proposalId: string, choice: boolean) {
+    await getContractAs(actor, 'governance').submitTransaction('CastVote', proposalId, String(choice));
   },
-  async closeProposal(proposalId: string) {
-    const c = await getContract('governance');
-    await c.submitTransaction('CloseProposal', proposalId);
+  async closeProposal(actor: ActorKey, proposalId: string) {
+    await getContractAs(actor, 'governance').submitTransaction('CloseProposal', proposalId);
   },
+
+  // --- reads (default asociacion) ---
   async getProposal<T = unknown>(id: string): Promise<T> {
-    const c = await getContract('governance');
-    return parseResult<T>(await c.evaluateTransaction('GetProposal', id));
+    return parseResult<T>(await getContractAs('asociacion', 'governance').evaluateTransaction('GetProposal', id));
   },
   async listProposals<T = unknown>(): Promise<T> {
-    const c = await getContract('governance');
-    return parseResult<T>(await c.evaluateTransaction('ListProposals'));
+    return parseResult<T>(await getContractAs('asociacion', 'governance').evaluateTransaction('ListProposals'));
+  },
+  async listProductoras(): Promise<string[]> {
+    return parseResult<string[]>(await getContractAs('asociacion', 'governance').evaluateTransaction('ListProductoras')) ?? [];
   },
 };
 
@@ -45,8 +65,7 @@ export const Issuance = {
     principalCents: string; couponBps: number; termMonths: number;
     numParticipations: string; whitepaperHash: string;
   }) {
-    const c = await getContract('bond-issuance');
-    await c.submitTransaction(
+    await getContractAs('asociacion', 'bond-issuance').submitTransaction(
       'CreateBond',
       args.id, args.proposalId, args.filmTitle, args.productoraMSP,
       args.principalCents, String(args.couponBps), String(args.termMonths),
@@ -54,16 +73,31 @@ export const Issuance = {
     );
   },
   async allowInvestor(investorId: string) {
-    const c = await getContract('bond-issuance');
-    await c.submitTransaction('AllowInvestor', investorId);
+    await getContractAs('asociacion', 'bond-issuance').submitTransaction('AllowInvestor', investorId);
+  },
+  async revokeInvestor(investorId: string) {
+    await getContractAs('asociacion', 'bond-issuance').submitTransaction('RevokeInvestor', investorId);
   },
   async mint(bondId: string, investorId: string, amount: string) {
-    const c = await getContract('bond-issuance');
-    await c.submitTransaction('Mint', bondId, investorId, amount);
+    await getContractAs('asociacion', 'bond-issuance').submitTransaction('Mint', bondId, investorId, amount);
+  },
+  // Custodial: la asociación transfiere por cuenta del inversor.
+  async transfer(bondId: string, from: string, to: string, amount: string) {
+    await getContractAs('asociacion', 'bond-issuance').submitTransaction('Transfer', bondId, from, to, amount);
   },
   async balanceOf(bondId: string, investorId: string): Promise<bigint> {
-    const c = await getContract('bond-issuance');
-    return BigInt(decoder.decode(await c.evaluateTransaction('BalanceOf', bondId, investorId)));
+    return BigInt(decoder.decode(await getContractAs('asociacion', 'bond-issuance').evaluateTransaction('BalanceOf', bondId, investorId)));
+  },
+  async getBond<T = unknown>(id: string): Promise<T> {
+    return parseResult<T>(await getContractAs('asociacion', 'bond-issuance').evaluateTransaction('GetBond', id));
+  },
+  async listBonds<T = unknown>(): Promise<T> {
+    return parseResult<T>(await getContractAs('asociacion', 'bond-issuance').evaluateTransaction('ListBonds'));
+  },
+  async getHolders(bondId: string): Promise<Record<string, number>> {
+    return parseResult<Record<string, number>>(
+      await getContractAs('asociacion', 'bond-issuance').evaluateTransaction('GetHolders', bondId),
+    ) ?? {};
   },
 };
 
@@ -72,16 +106,13 @@ export const Lifecycle = {
     bondId: string; periodIndex: number; dueAt: number;
     holders: Record<string, number>; couponPerParticipationCents: string;
   }) {
-    const c = await getContract('bond-lifecycle');
-    await c.submitTransaction(
+    await getContractAs('asociacion', 'bond-lifecycle').submitTransaction(
       'ScheduleCoupon',
       args.bondId, String(args.periodIndex), String(args.dueAt),
       JSON.stringify(args.holders), args.couponPerParticipationCents,
     );
   },
   async confirmPayment(bondId: string, periodIndex: number, investorId: string, sepaRefHash: string) {
-    const c = await getContract('bond-lifecycle');
-    await c.submitTransaction('ConfirmPayment', bondId, String(periodIndex), investorId, sepaRefHash);
+    await getContractAs('asociacion', 'bond-lifecycle').submitTransaction('ConfirmPayment', bondId, String(periodIndex), investorId, sepaRefHash);
   },
 };
-

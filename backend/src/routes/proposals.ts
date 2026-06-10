@@ -12,13 +12,14 @@ const CreateProposalBody = z.object({
   termMonths: z.number().int().positive(),
   numParticipations: z.string().regex(/^\d+$/),
   whitepaperHash: z.string().min(1),
-  whitepaperURL: z.string().url(),
+  whitepaperUrl: z.string().url(),
 });
 
+// Una productora propone. El actor activo (header X-Acting-As) lo selecciona.
 proposalsRouter.post('/', async (req, res, next) => {
   try {
     const body = CreateProposalBody.parse(req.body);
-    await Governance.createProposal(body);
+    await Governance.createProposal(req.actor, body);
     res.status(201).json({ ok: true });
   } catch (e) { next(e); }
 });
@@ -26,21 +27,21 @@ proposalsRouter.post('/', async (req, res, next) => {
 proposalsRouter.post('/:id/vote', async (req, res, next) => {
   try {
     const choice = z.boolean().parse(req.body?.choice);
-    await Governance.castVote(req.params.id, choice);
+    await Governance.castVote(req.actor, req.params.id, choice);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
 proposalsRouter.post('/:id/close', async (req, res, next) => {
   try {
-    await Governance.closeProposal(req.params.id);
+    await Governance.closeProposal(req.actor, req.params.id);
     res.json({ ok: true });
   } catch (e) { next(e); }
 });
 
 proposalsRouter.get('/', async (_req, res, next) => {
   try {
-    res.json(await Governance.listProposals());
+    res.json(await Governance.listProposals() ?? []);
   } catch (e) { next(e); }
 });
 

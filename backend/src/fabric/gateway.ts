@@ -1,75 +1,104 @@
 import { connect, signers } from '@hyperledger/fabric-gateway';
-import type { Contract, Gateway } from '@hyperledger/fabric-gateway';
+import type { Contract, Gateway, Identity, Signer } from '@hyperledger/fabric-gateway';
 import * as grpc from '@grpc/grpc-js';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { createPrivateKey } from 'node:crypto';
 
-// Conexión al gateway gRPC del peer. Una conexión por instancia de identidad.
-// En producción con custodia centralizada (Modelo A): el backend mantiene un pool
-// de Gateways indexados por investorId, cada uno construido con el cert+key
-// del inversor extraído del HSM.
+// Identidades disponibles. Cada una mapea a un MSP y a un cert/key de admin.
+// 'asociacion' es la identidad por defecto y la que firma operaciones custodiales
+// (en nombre de inversores, alta de censo, etc.). 'productora{1,2,3}' actúan
+// como esas productoras concretas para proponer y votar.
+export type ActorKey = 'asociacion' | 'productora1' | 'productora2' | 'productora3';
 
-type Env = {
-  endpoint: string;
-  hostnameOverride: string;
-  mspId: string;
-  tlsCertPath: string;
-  certPath: string;
-  keyDir: string;
+const ACTORS: Record<ActorKey, { mspId: string; org: string; user: string }> = {
+  asociacion:  { mspId: 'AsociacionMSP',  org: 'asociacion',  user: 'Admin' },
+  productora1: { mspId: 'Productora1MSP', org: 'productora1', user: 'Admin' },
+  productora2: { mspId: 'Productora2MSP', org: 'productora2', user: 'Admin' },
+  productora3: { mspId: 'Productora3MSP', org: 'productora3', user: 'Admin' },
 };
 
-function env(): Env {
-  const need = (k: string) => {
-    const v = process.env[k];
-    if (!v) throw new Error(`missing env ${k}`);
-    return v;
+function envOr(name: string, fallback: string): string {
+  return process.env[name] ?? fallback;
+}
+
+function orgDir(org: string): string {
+  const base = envOr('FABRIC_ORGS_DIR', '../network/organizations/peerOrganizations');
+  return join(base, `${org}.productoras.local`);
+}
+
+function peerEndpointFor(org: ActorKey): { endpoint: string; hostname: string } {
+  // Mismos puertos que docker-compose.yaml. El backend conecta al peer de la
+  // org cuyo gateway necesitamos para gather de endorsements en su nombre.
+  const map: Record<ActorKey, { endpoint: string; hostname: string }> = {
+    asociacion:  { endpoint: 'localhost:7051',  hostname: 'peer0.asociacion.productoras.local'  },
+    productora1: { endpoint: 'localhost:8051',  hostname: 'peer0.productora1.productoras.local' },
+    productora2: { endpoint: 'localhost:9051',  hostname: 'peer0.productora2.productoras.local' },
+    productora3: { endpoint: 'localhost:10051', hostname: 'peer0.productora3.productoras.local' },
   };
-  return {
-    endpoint: need('FABRIC_PEER_ENDPOINT'),
-    hostnameOverride: need('FABRIC_PEER_HOSTNAME_OVERRIDE'),
-    mspId: need('FABRIC_MSP_ID'),
-    tlsCertPath: need('FABRIC_TLS_CERT_PATH'),
-    certPath: need('FABRIC_CERT_PATH'),
-    keyDir: need('FABRIC_KEY_DIR'),
-  };
+  return map[org];
 }
 
-function loadAdminCert(certDir: string): Uint8Array {
-  const files = readdirSync(certDir).filter((f) => f.endsWith('.pem'));
-  if (!files.length) throw new Error(`no cert in ${certDir}`);
-  return readFileSync(join(certDir, files[0]));
+function loadIdentity(actor: ActorKey): { identity: Identity; signer: Signer } {
+  const { mspId, org, user } = ACTORS[actor];
+  const userDir = join(orgDir(org), 'users', `${user}@${org}.productoras.local`, 'msp');
+  const certDir = join(userDir, 'signcerts');
+  const keyDir = join(userDir, 'keystore');
+
+  const certFile = readdirSync(certDir).find((f) => f.endsWith('.pem'));
+  if (!certFile) throw new Error(`no cert in ${certDir}`);
+  const credentials = readFileSync(join(certDir, certFile));
+
+  const keyFile = readdirSync(keyDir)[0];
+  if (!keyFile) throw new Error(`no key in ${keyDir}`);
+  const key = createPrivateKey(readFileSync(join(keyDir, keyFile)));
+  const signer = signers.newPrivateKeySigner(key);
+
+  return { identity: { mspId, credentials }, signer };
 }
 
-function loadAdminKey(keyDir: string): ReturnType<typeof signers.newPrivateKeySigner> {
-  const files = readdirSync(keyDir);
-  if (!files.length) throw new Error(`no key in ${keyDir}`);
-  const pem = readFileSync(join(keyDir, files[0]));
-  const key = createPrivateKey(pem);
-  return signers.newPrivateKeySigner(key);
+function loadTlsCa(actor: ActorKey): Uint8Array {
+  const { org } = ACTORS[actor];
+  const path = join(orgDir(org), 'peers', `peer0.${org}.productoras.local`, 'tls', 'ca.crt');
+  return readFileSync(path);
 }
 
-let cached: { gateway: Gateway; client: grpc.Client } | null = null;
+const channel = envOr('FABRIC_CHANNEL', 'productoras');
+const pool = new Map<ActorKey, { gateway: Gateway; client: grpc.Client }>();
 
-export async function getAdminGateway(): Promise<Gateway> {
-  if (cached) return cached.gateway;
-  const e = env();
-  const tlsRoot = readFileSync(e.tlsCertPath);
-  const tlsCredentials = grpc.credentials.createSsl(tlsRoot);
-  const client = new grpc.Client(e.endpoint, tlsCredentials, {
-    'grpc.ssl_target_name_override': e.hostnameOverride,
+function buildGateway(actor: ActorKey): { gateway: Gateway; client: grpc.Client } {
+  const { endpoint, hostname } = peerEndpointFor(actor);
+  const tlsCredentials = grpc.credentials.createSsl(Buffer.from(loadTlsCa(actor)));
+  const client = new grpc.Client(endpoint, tlsCredentials, {
+    'grpc.ssl_target_name_override': hostname,
   });
-  const gateway = connect({
-    client,
-    identity: { mspId: e.mspId, credentials: loadAdminCert(e.certPath) },
-    signer: loadAdminKey(e.keyDir),
-  });
-  cached = { gateway, client };
-  return gateway;
+  const { identity, signer } = loadIdentity(actor);
+  const gateway = connect({ client, identity, signer });
+  return { gateway, client };
 }
 
-export async function getContract(chaincodeName: string, contractName?: string): Promise<Contract> {
-  const gw = await getAdminGateway();
-  const network = gw.getNetwork(process.env.FABRIC_CHANNEL ?? 'productoras');
-  return contractName ? network.getContract(chaincodeName, contractName) : network.getContract(chaincodeName);
+export function getGatewayFor(actor: ActorKey): Gateway {
+  let entry = pool.get(actor);
+  if (!entry) {
+    entry = buildGateway(actor);
+    pool.set(actor, entry);
+  }
+  return entry.gateway;
+}
+
+export function getContractAs(actor: ActorKey, chaincode: string): Contract {
+  return getGatewayFor(actor).getNetwork(channel).getContract(chaincode);
+}
+
+// Compat: por defecto, asociación.
+export function getContract(chaincode: string): Contract {
+  return getContractAs('asociacion', chaincode);
+}
+
+export function closeAll(): void {
+  for (const { gateway, client } of pool.values()) {
+    gateway.close();
+    client.close();
+  }
+  pool.clear();
 }

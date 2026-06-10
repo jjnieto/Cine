@@ -25,7 +25,7 @@ const (
 
 // AllowInvestor añade un inversor a la lista blanca. Solo el oficial KYC de la asociación.
 func (c *IssuanceContract) AllowInvestor(ctx contractapi.TransactionContextInterface, investorID string) error {
-	if err := requireRole(ctx, "kyc.officer"); err != nil {
+	if err := requireAsociacionOrRole(ctx, "kyc.officer"); err != nil {
 		return err
 	}
 	key, _ := ctx.GetStub().CreateCompositeKey(prefixAllowed, []string{investorID})
@@ -33,7 +33,7 @@ func (c *IssuanceContract) AllowInvestor(ctx contractapi.TransactionContextInter
 }
 
 func (c *IssuanceContract) RevokeInvestor(ctx contractapi.TransactionContextInterface, investorID string) error {
-	if err := requireRole(ctx, "kyc.officer"); err != nil {
+	if err := requireAsociacionOrRole(ctx, "kyc.officer"); err != nil {
 		return err
 	}
 	key, _ := ctx.GetStub().CreateCompositeKey(prefixAllowed, []string{investorID})
@@ -168,14 +168,25 @@ func (c *IssuanceContract) Mint(ctx contractapi.TransactionContextInterface, bon
 	return putJSON(ctx, bondKey(bondID), *b)
 }
 
-// Transfer entre dos inversores allowlisted. El caller debe coincidir con `from`.
+// Transfer entre dos inversores allowlisted.
+// Dos modos de autorización:
+//   - Custodial (Modelo A): caller es AsociacionMSP → confía en `from` (la
+//     asociación tiene custodia de las claves y firma por el inversor).
+//   - No-custodial: caller tiene atributo cert "investorId" → debe coincidir con `from`.
 func (c *IssuanceContract) Transfer(ctx contractapi.TransactionContextInterface, bondID string, from string, to string, amount int64) error {
-	caller, err := callerInvestorID(ctx)
+	mspID, err := ctx.GetClientIdentity().GetMSPID()
 	if err != nil {
 		return err
 	}
-	if caller != from {
-		return fmt.Errorf("caller %s cannot transfer from %s", caller, from)
+	if mspID != "AsociacionMSP" {
+		// Modo no-custodial: solo aceptamos si el cert lleva investorId que coincide con from.
+		caller, err := callerInvestorID(ctx)
+		if err != nil {
+			return err
+		}
+		if caller != from {
+			return fmt.Errorf("caller %s cannot transfer from %s", caller, from)
+		}
 	}
 	if from == to {
 		return fmt.Errorf("from and to must differ")
@@ -293,14 +304,23 @@ func requireMSP(ctx contractapi.TransactionContextInterface, mspId string) error
 	return nil
 }
 
-// requireRole: comprueba el atributo "role" del certificado del caller.
-func requireRole(ctx contractapi.TransactionContextInterface, role string) error {
+// requireAsociacionOrRole: acepta si el caller es admin de AsociacionMSP
+// (modelo de custodia centralizada) o si su cert lleva el atributo "role"
+// con el valor esperado (modelo con separación de roles en certs).
+func requireAsociacionOrRole(ctx contractapi.TransactionContextInterface, role string) error {
+	msp, err := ctx.GetClientIdentity().GetMSPID()
+	if err != nil {
+		return err
+	}
+	if msp == "AsociacionMSP" {
+		return nil
+	}
 	v, ok, err := ctx.GetClientIdentity().GetAttributeValue("role")
 	if err != nil {
 		return err
 	}
 	if !ok || v != role {
-		return fmt.Errorf("requires role %s", role)
+		return fmt.Errorf("requires AsociacionMSP or role=%s", role)
 	}
 	return nil
 }

@@ -100,53 +100,47 @@ npm install
 npm run dev    # vite → http://localhost:5173
 ```
 
-### 6. Smoke test (5 llamadas)
+### 6. Smoke test end-to-end (1 comando)
 
-Con el backend corriendo, ejecuta el script empaquetado:
+Con el backend corriendo, ejecuta el script empaquetado. Cubre el flujo completo:
+
 ```bash
 ./scripts/smoke-test.sh
 ```
 
-O hazlo a mano para entender qué pasa:
-```bash
-# Health
-curl http://localhost:3000/health
+Hace, en orden:
+1. Asegura el censo con `Productora1/2/3MSP`.
+2. Baja la duración de votación a **30 segundos** para que la demo sea ágil (`SetParams`).
+3. `Productora1` crea una propuesta.
+4. `Productora2` y `Productora3` votan SÍ.
+5. Tras 30 s, cierra la votación → `APPROVED`.
+6. Materializa el bono (`CreateBond`).
+7. KYC + alta de **Juan** y **María**.
+8. Juan compra 100 participaciones en **primario** (`Mint`).
+9. Juan publica una orden de 30 participaciones a 12 €/u en el **secundario**.
+10. María acepta la orden → `Transfer` on-chain.
+11. Balances finales: Juan 70, María 30.
 
-# Censo: añade AsociacionMSP al censo de productoras (admin op)
-# (se hace una vez con peer CLI; el backend no expone este endpoint todavía)
-./scripts/add-productora.sh AsociacionMSP
-
-# Crear propuesta
-curl -X POST http://localhost:3000/proposals \
-  -H "content-type: application/json" \
-  -d '{
-    "id":"PROP-001",
-    "filmTitle":"La pelicula imposible",
-    "principalCents":"1000000000",
-    "couponBps":600,
-    "termMonths":36,
-    "numParticipations":"10000",
-    "whitepaperHash":"deadbeef...",
-    "whitepaperURL":"https://example.com/wp.pdf"
-  }'
-# → 201 {"ok":true}
-
-# Votar
-curl -X POST http://localhost:3000/proposals/PROP-001/vote \
-  -H "content-type: application/json" -d '{"choice":true}'
-
-# Leer
-curl http://localhost:3000/proposals/PROP-001 | jq .
-# → status:"OPEN", yesVotes:1, votingEnd: now+7d
-```
-
-Errores del chaincode aparecen en la respuesta del backend con el mensaje real, p. ej.:
+Los errores del chaincode aparecen en la respuesta del backend con el mensaje real:
 ```json
-{
-  "error": "10 ABORTED: failed to endorse transaction, …",
-  "chaincode": ["caller AsociacionMSP already voted on PROP-001"]
-}
+{ "error": "10 ABORTED: failed to endorse transaction, …",
+  "chaincode": ["caller AsociacionMSP already voted on PROP-001"] }
 ```
+
+### 7. La UI
+
+```bash
+cd frontend && npm install && npm run dev  # http://localhost:5173
+```
+
+Tres vistas, todas con un **selector "Actuando como"** en la cabecera (Asociación / Productora 1-3):
+
+- **`/productoras`** — la productora activa crea propuestas (formulario) y vota Sí/No en las de otras. Las propuestas propias se separan en su sección.
+- **`/inversores`** — KYC de nuevos inversores, selector del inversor activo, tres subvistas:
+  - *Marketplace primario*: tarjetas de bonos activos con `Disponibles = numParticipations - totalSupply`. Botón **Comprar** → mintea contra el inversor.
+  - *Mi cartera*: tabla de balances por bono. Botón **Vender en secundario** crea una orden.
+  - *Mercado secundario*: órdenes abiertas. Aceptar una ejecuta `Transfer` on-chain.
+- **`/admin`** — visible para Asociación: gestiona el censo, cierra propuestas vencidas, materializa propuestas APROBADAS en bonos, lista de inversores y operaciones avanzadas (`Init`, ajustar `quorumBps` / `votingDurationS`).
 
 ## Estado real
 
@@ -158,12 +152,20 @@ Errores del chaincode aparecen en la respuesta del backend con el mensaje real, 
   - **`bond-issuance`** — emisión de bonos, tokenización fungible (1 participación = 1 token), allowlist KYC, balances, transferencias. Importes en céntimos `int64`. Identidad del inversor por atributo de cert `investorId`.
   - **`bond-lifecycle`** — calendario de cupones, obligaciones de pago, confirmación con hash de referencia SEPA, marcado de impagos.
 - **Backend Express + TypeScript** con rutas REST que invocan los chaincodes vía `@hyperledger/fabric-gateway`:
-  - `GET /health`, `GET|POST /proposals`, `POST /proposals/:id/vote|close`, `GET /proposals/:id`
-  - `POST /bonds`, `POST /bonds/:id/mint`, `GET /bonds/:id/balance/:investorId`
-  - `POST /investors/onboard` (KYC stub), `POST /payments/schedule-coupon|confirm`
+  - Identity pool: un Gateway por org (Asociación + 3 productoras). Header `X-Acting-As` selecciona la identidad activa.
+  - `/proposals`, `/proposals/:id/vote|close`
+  - `/admin/productoras` (alta/baja censo), `/admin/proposals/:id/materialize`, `/admin/params` (quórum y duración votación)
+  - `/investors/onboard`, `/investors`
+  - `/bonds`, `/bonds/:id/purchase` (primario simulado), `/bonds/:id/holders|balance/:investorId`
+  - `/orders` (CRUD orderbook secundario off-chain) → `/orders/:id/fill` ejecuta `Transfer` on-chain
+  - `/portfolio/:investorId`
+  - `/payments/schedule-coupon|confirm` (sólo backend, sin UI todavía)
   - Middleware que propaga el mensaje real del chaincode en la respuesta JSON.
-- **Frontend React + Vite** con páginas placeholder (`Proposals`, `Bonds`, `Portfolio`) que consumen el backend vía proxy.
-- **Verificación end-to-end**: el flujo `Init governance → AddProductora → CreateProposal → CastVote → GetProposal` se ejecuta correctamente vía API REST.
+- **Frontend React + Vite + Tailwind** con tres vistas funcionales:
+  - `/productoras`: crear propuestas y votar como la productora seleccionada.
+  - `/inversores`: KYC, primario, cartera, secundario.
+  - `/admin`: gestión del censo, cierre y materialización de propuestas, ajuste de parámetros.
+- **Verificación end-to-end** con `scripts/smoke-test.sh`: censo → propuesta → votos → cierre → materializar → primario → secundario.
 
 ### Lo que es stub o falta
 
@@ -171,10 +173,10 @@ Errores del chaincode aparecen en la respuesta del backend con el mensaje real, 
 |---|---|---|
 | HSM real (firma por inversor) | Stub que tira `Error` si se invoca | `backend/src/identity/hsm.ts` |
 | Proveedor KYC | Mock: hashea el `documentId` | `backend/src/identity/kyc.ts` |
-| Pool de identidades por inversor | El backend usa el admin de `AsociacionMSP` para todo | `backend/src/fabric/gateway.ts` |
-| Listener `ProposalApproved → CreateBond` automático | No implementado | — |
-| Autenticación en el backend | Ninguna | — |
-| Frontend funcional | Solo muestra JSON crudo. Sin formularios reales | `frontend/src/pages/*` |
+| Pool de identidades por inversor | El backend usa el admin de `AsociacionMSP` por inversor (custodia Modelo A); las productoras sí tienen su propio gateway | `backend/src/fabric/gateway.ts` |
+| Listener `ProposalApproved → CreateBond` automático | Hay endpoint `/admin/proposals/:id/materialize` manual; no hay watcher de eventos | `backend/src/routes/admin.ts` |
+| Autenticación en el backend | Ninguna (la UI tiene "actuar como" sin credenciales) | — |
+| Pago SEPA | El endpoint `/bonds/:id/purchase` mintea directamente; en producción sería un webhook bancario | `backend/src/routes/bonds.ts` |
 | Tests unitarios | Ninguno en ningún sitio | — |
 | Endorsement policies estrictas | Se usa la default `MAJORITY` del canal. Para chaincodes que mueven dinero conviene `--signature-policy` por chaincode | `network/scripts/network.sh` |
 
@@ -226,8 +228,8 @@ Diagrama detallado del flujo completo (propuesta → emisión → cupón → amo
 
 ```
 chaincodes/
-├── governance/           Go — propuestas, votación, censo
-├── bond-issuance/        Go — tokenización, allowlist, balances, transferencias
+├── governance/           Go — propuestas, votación, censo, parámetros
+├── bond-issuance/        Go — tokenización, allowlist, balances, transferencias (modo custodial)
 └── bond-lifecycle/       Go — cupones, pagos, amortización
 network/
 ├── cryptogen/            Configs cryptogen por org
@@ -238,19 +240,27 @@ network/
     └── network.sh        up | down | reset | createChannel | deployCC
 backend/
 ├── src/
-│   ├── fabric/           gateway.ts (conexión), contracts.ts (wrappers tipados)
-│   ├── routes/           proposals.ts, bonds.ts, investors.ts, payments.ts
+│   ├── fabric/           gateway.ts (pool por identidad), contracts.ts (wrappers tipados)
+│   ├── middleware/       actor.ts (lee X-Acting-As)
+│   ├── routes/           proposals · bonds · investors · admin · orders · portfolio · payments
+│   ├── store/            investors.ts y orders.ts (persistencia JSON)
 │   ├── identity/         hsm.ts (stub), kyc.ts (mock)
 │   └── index.ts          Express + middleware de errores
 └── package.json
 frontend/
-└── src/
-    ├── App.tsx           Routing y layout
-    ├── api/client.ts     fetch contra el backend
-    └── pages/            Proposals, Bonds, Portfolio (placeholders)
+├── src/
+│   ├── App.tsx           Routing y layout
+│   ├── components/Layout.tsx   topbar con selector "Actuando como"
+│   ├── state/ActorContext.tsx  identidad Fabric + inversor activo
+│   ├── api/client.ts     fetch (inyecta header X-Acting-As)
+│   ├── lib/format.ts     helpers eur/bps/dateFmt/timeUntil
+│   └── pages/            Productoras · Inversores · Admin
+├── tailwind.config.js
+└── package.json
 scripts/
-├── smoke-test.sh         Flujo completo: create + vote + read
-└── add-productora.sh     Atajo para AddProductora (admin)
+├── smoke-test.sh         Flujo completo end-to-end (gobierno + primario + secundario)
+├── add-productora.sh     Atajo para AddProductora (admin)
+└── _peer-env.sh          Helpers para invocar peer CLI con identidad de una org
 docs/
 └── architecture.md       Diagrama detallado + matriz de identidades
 CLAUDE.md                 Guía para Claude Code (ver decisiones de diseño)

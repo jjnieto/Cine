@@ -30,6 +30,23 @@ func (c *GovernanceContract) Init(ctx contractapi.TransactionContextInterface) e
 	return putJSON(ctx, keyParams, params)
 }
 
+// SetParams actualiza los parámetros del sistema (quórum, duración de votación).
+// Solo AsociacionMSP. Útil en demo para acelerar votaciones.
+func (c *GovernanceContract) SetParams(ctx contractapi.TransactionContextInterface, quorumBps int32, votingDurationS int64) error {
+	if err := requireAssociationAdmin(ctx); err != nil {
+		return err
+	}
+	if quorumBps < 0 || quorumBps > 10000 || votingDurationS <= 0 {
+		return fmt.Errorf("invalid params")
+	}
+	return putJSON(ctx, keyParams, GovernanceParams{QuorumBps: quorumBps, VotingDurationS: votingDurationS})
+}
+
+// GetParams devuelve los parámetros actuales.
+func (c *GovernanceContract) GetParams(ctx contractapi.TransactionContextInterface) (*GovernanceParams, error) {
+	return getParams(ctx)
+}
+
 // --- Censo de productoras ---
 
 // AddProductora añade una productora al censo. Solo invocable por la org admin
